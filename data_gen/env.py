@@ -4,24 +4,23 @@ Running this script directly executes the random agent in environment and stores
 experience in a replay buffer.
 """
 
-# Get env directory
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path.cwd()))
-print(sys.path)
 
 import argparse
-
-# noinspection PyUnresolvedReferences
+from threading import Thread
+from queue import Queue
 import envs
-
 import utils
-
 import gym
 from gym import logger
-
 import numpy as np
 from PIL import Image
+import time
+
+
+# noinspection PyUnresolvedReferences
 
 
 class RandomAgent(object):
@@ -41,6 +40,69 @@ def crop_normalize(img, crop_ratio):
     return np.transpose(np.array(img), (2, 0, 1)) / 255
 
 
+class RolloutWorker(Thread):
+    def __init__(self, queue, replay_buffer, **kwargs):
+        super().__init__()
+        self.queue = queue
+        self.replay_buffer = replay_buffer
+        self.args = kwargs
+
+    def run(self):
+        while True:
+            episode_number = self.queue.get()
+            self.run_rollout(episode_number)
+            print(episode_number)
+            self.queue.task_done()
+
+    def run_rollout(self, i):
+        crop = self.args['crop']
+        reward = 0
+        done = False
+
+        ob = env.reset()
+
+        if args.atari:
+            # Burn-in steps
+            for _ in range(warmstart):
+                action = agent.act(ob, reward, done)
+                ob, _, _, _ = env.step(action)
+            prev_ob = crop_normalize(ob, crop)
+            ob, _, _, _ = env.step(0)
+            ob = crop_normalize(ob, crop)
+
+            while True:
+                self.replay_buffer[i]['obs'].append(
+                    np.concatenate((ob, prev_ob), axis=0))
+                prev_ob = ob
+
+                action = agent.act(ob, reward, done)
+                ob, reward, done, _ = env.step(action)
+                ob = crop_normalize(ob, crop)
+
+                self.replay_buffer[i]['action'].append(action)
+                self.replay_buffer[i]['next_obs'].append(
+                    np.concatenate((ob, prev_ob), axis=0))
+
+                if done:
+                    break
+        else:
+
+            while True:
+                self.replay_buffer[i]['obs'].append(ob[1])
+
+                t = time.time()
+                action = agent.act(ob, reward, done)
+                ob, reward, done, _ = env.step(action)
+                end = time.time() - t
+                print(i, end)
+
+                self.replay_buffer[i]['action'].append(action)
+                self.replay_buffer[i]['next_obs'].append(ob[1])
+
+                if done:
+                    break
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('--env_id', type=str, default='ShapesTrain-v0',
@@ -53,6 +115,8 @@ if __name__ == '__main__':
                         help='Run atari mode (stack multiple frames).')
     parser.add_argument('--seed', type=int, default=1,
                         help='Random seed.')
+    parser.add_argument('--num_workers', type=int, default=8,
+                        help='Number of workers')
     args = parser.parse_args()
 
     logger.set_level(logger.INFO)
@@ -66,8 +130,6 @@ if __name__ == '__main__':
     agent = RandomAgent(env.action_space)
 
     episode_count = args.num_episodes
-    reward = 0
-    done = False
 
     crop = None
     warmstart = None
@@ -83,6 +145,12 @@ if __name__ == '__main__':
 
     replay_buffer = []
 
+    q = Queue()
+    for i in range(args.num_workers):
+        t = RolloutWorker(q, replay_buffer=replay_buffer, crop=crop)
+        t.daemon = True
+        t.start()
+
     for i in range(episode_count):
 
         replay_buffer.append({
@@ -91,51 +159,10 @@ if __name__ == '__main__':
             'next_obs': [],
         })
 
-        ob = env.reset()
+        q.put(i)
 
-        if args.atari:
-            # Burn-in steps
-            for _ in range(warmstart):
-                action = agent.act(ob, reward, done)
-                ob, _, _, _ = env.step(action)
-            prev_ob = crop_normalize(ob, crop)
-            ob, _, _, _ = env.step(0)
-            ob = crop_normalize(ob, crop)
-
-            while True:
-                replay_buffer[i]['obs'].append(
-                    np.concatenate((ob, prev_ob), axis=0))
-                prev_ob = ob
-
-                action = agent.act(ob, reward, done)
-                ob, reward, done, _ = env.step(action)
-                ob = crop_normalize(ob, crop)
-
-                replay_buffer[i]['action'].append(action)
-                replay_buffer[i]['next_obs'].append(
-                    np.concatenate((ob, prev_ob), axis=0))
-
-                if done:
-                    break
-        else:
-
-            while True:
-                replay_buffer[i]['obs'].append(ob[1])
-
-                action = agent.act(ob, reward, done)
-                ob, reward, done, _ = env.step(action)
-
-                replay_buffer[i]['action'].append(action)
-                replay_buffer[i]['next_obs'].append(ob[1])
-
-                if done:
-                    break
-
-        if i % 10 == 0:
-            print("iter "+str(i))
-
+    q.join()
     env.close()
 
     # Save replay buffer to disk.
     utils.save_list_dict_h5py(replay_buffer, args.fname)
-
