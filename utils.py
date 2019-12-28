@@ -125,6 +125,10 @@ def unsorted_segment_sum(tensor, segment_ids, num_segments):
     return result
 
 
+def time_remaining(x, total, time_so_far):
+    return time_so_far * total / max(x, 3)
+
+
 class StateTransitionsDataset(data.Dataset):
     """Create dataset of (o_t, a_t, o_{t+1}) transitions from replay buffer."""
 

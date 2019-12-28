@@ -145,8 +145,9 @@ if __name__ == '__main__':
     with Pool(args.num_workers) as p:
         for run in p.imap(do_episode, range(episode_count)):
             replay_buffer.append(run)
-            print('{}/{} episodes complete in {}s'.format(len(replay_buffer), episode_count,
-            int(time.time() - start)))
+            display_data = len(replay_buffer), episode_count, int(time.time() - start)
+            print('{}/{} episodes complete in {}s ({}s to go!)'.format(
+                *display_data, int(utils.time_remaining(*display_data))))
 
     env.close()
 
