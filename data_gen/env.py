@@ -8,9 +8,9 @@ experience in a replay buffer.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path.cwd()))
-print(sys.path)
 
 import argparse
+from multiprocessing import Pool
 
 # noinspection PyUnresolvedReferences
 import envs
@@ -41,6 +41,60 @@ def crop_normalize(img, crop_ratio):
     return np.transpose(np.array(img), (2, 0, 1)) / 255
 
 
+def rollout(**kwargs):
+    reward = 0
+    done = False
+    crop = kwargs.get('crop')
+
+    trace = {
+        'obs': [],
+        'action': [],
+            'next_obs': [],
+    }
+
+    ob = env.reset()
+
+    if args.atari:
+        # Burn-in steps
+        for _ in range(warmstart):
+            action = agent.act(ob, reward, done)
+            ob, _, _, _ = env.step(action)
+        prev_ob = crop_normalize(ob, crop)
+        ob, _, _, _ = env.step(0)
+        ob = crop_normalize(ob, crop)
+
+        while True:
+            trace['obs'].append(
+                np.concatenate((ob, prev_ob), axis=0))
+            prev_ob = ob
+
+            action = agent.act(ob, reward, done)
+            ob, reward, done, _ = env.step(action)
+            ob = crop_normalize(ob, crop)
+
+            trace['action'].append(action)
+            trace['next_obs'].append(
+                np.concatenate((ob, prev_ob), axis=0))
+
+            if done:
+                break
+    else:
+
+        while True:
+            trace['obs'].append(ob[1])
+
+            action = agent.act(ob, reward, done)
+            ob, reward, done, _ = env.step(action)
+
+            trace['action'].append(action)
+            trace['next_obs'].append(ob[1])
+
+            if done:
+                break
+    
+    return trace
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('--env_id', type=str, default='ShapesTrain-v0',
@@ -53,6 +107,8 @@ if __name__ == '__main__':
                         help='Run atari mode (stack multiple frames).')
     parser.add_argument('--seed', type=int, default=1,
                         help='Random seed.')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of rollout workers')
     args = parser.parse_args()
 
     logger.set_level(logger.INFO)
@@ -66,8 +122,6 @@ if __name__ == '__main__':
     agent = RandomAgent(env.action_space)
 
     episode_count = args.num_episodes
-    reward = 0
-    done = False
 
     crop = None
     warmstart = None
@@ -83,59 +137,17 @@ if __name__ == '__main__':
 
     replay_buffer = []
 
-    for i in range(episode_count):
-
-        replay_buffer.append({
-            'obs': [],
-            'action': [],
-            'next_obs': [],
-        })
-
-        ob = env.reset()
-
-        if args.atari:
-            # Burn-in steps
-            for _ in range(warmstart):
-                action = agent.act(ob, reward, done)
-                ob, _, _, _ = env.step(action)
-            prev_ob = crop_normalize(ob, crop)
-            ob, _, _, _ = env.step(0)
-            ob = crop_normalize(ob, crop)
-
-            while True:
-                replay_buffer[i]['obs'].append(
-                    np.concatenate((ob, prev_ob), axis=0))
-                prev_ob = ob
-
-                action = agent.act(ob, reward, done)
-                ob, reward, done, _ = env.step(action)
-                ob = crop_normalize(ob, crop)
-
-                replay_buffer[i]['action'].append(action)
-                replay_buffer[i]['next_obs'].append(
-                    np.concatenate((ob, prev_ob), axis=0))
-
-                if done:
-                    break
-        else:
-
-            while True:
-                replay_buffer[i]['obs'].append(ob[1])
-
-                action = agent.act(ob, reward, done)
-                ob, reward, done, _ = env.step(action)
-
-                replay_buffer[i]['action'].append(action)
-                replay_buffer[i]['next_obs'].append(ob[1])
-
-                if done:
-                    break
-
-        if i % 10 == 0:
-            print("iter "+str(i))
+    def do_episode(i):
+        r = rollout(crop=crop)
+        replay_buffer.append(r)
+        return i
+        
+    with Pool(args.num_workers) as p:
+        results = p.imap(do_episode, range(episode_count))
+        for t in results:
+            print(t)
 
     env.close()
 
     # Save replay buffer to disk.
     utils.save_list_dict_h5py(replay_buffer, args.fname)
-
