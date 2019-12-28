@@ -8,8 +8,8 @@ from gym import spaces
 from gym.utils import seeding
 
 import matplotlib as mpl
-mpl.use('Agg')
 import matplotlib.pyplot as plt
+plt.switch_backend('Agg')
 from mpl_toolkits.mplot3d import Axes3D
 from PIL import Image
 
@@ -206,4 +206,4 @@ class BlockPushing(gym.Env):
 
         state_obs = (self.get_state(), self.render())
 
-        return state_obs, reward, done, None
+        return state_obs, reward, done, dict()
