@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path.cwd()))
 
+import time
 import argparse
 from multiprocessing import Pool
 
@@ -57,6 +58,7 @@ def rollout(**kwargs):
     if args.atari:
         # Burn-in steps
         for _ in range(warmstart):
+
             action = agent.act(ob, reward, done)
             ob, _, _, _ = env.step(action)
         prev_ob = crop_normalize(ob, crop)
@@ -135,17 +137,16 @@ if __name__ == '__main__':
     if args.atari:
         env._max_episode_steps = warmstart + 11
 
-    replay_buffer = []
-
     def do_episode(i):
-        r = rollout(crop=crop)
-        replay_buffer.append(r)
-        return i
+        return rollout(crop=crop)
         
+    replay_buffer = []
+    start = time.time()
     with Pool(args.num_workers) as p:
-        results = p.imap(do_episode, range(episode_count))
-        for t in results:
-            print(t)
+        for run in p.imap(do_episode, range(episode_count)):
+            replay_buffer.append(run)
+            print('{}/{} episodes complete in {}s'.format(len(replay_buffer), episode_count,
+            int(time.time() - start)))
 
     env.close()
 
