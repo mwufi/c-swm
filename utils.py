@@ -126,7 +126,7 @@ def unsorted_segment_sum(tensor, segment_ids, num_segments):
 
 
 def time_remaining(x, total, time_so_far):
-    return time_so_far * total / max(x, 3)
+    return time_so_far * (total / max(x, 3) - 1.0)
 
 
 class StateTransitionsDataset(data.Dataset):
