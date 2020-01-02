@@ -152,4 +152,6 @@ if __name__ == '__main__':
     env.close()
 
     # Save replay buffer to disk.
+    print('Writing to disk...')
     utils.save_list_dict_h5py(replay_buffer, args.fname)
+    print('Done!')
